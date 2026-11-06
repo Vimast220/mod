@@ -86,7 +86,7 @@ public class RealShrooms implements ModInitializer {
                     BiomeKeys.TAIGA, BiomeKeys.OLD_GROWTH_PINE_TAIGA, BiomeKeys.OLD_GROWTH_SPRUCE_TAIGA)),
 
             // Бліда поганка: смертельно отруйна.
-            new Species("death_cap", MapColor.OLIVE_GREEN, 7, 7, true,
+            new Species("death_cap", MapColor.GREEN, 7, 7, true,
                 food(1, 0.0f)
                     .statusEffect(new StatusEffectInstance(StatusEffects.POISON, 600, 1), 1.0f)
                     .statusEffect(new StatusEffectInstance(StatusEffects.NAUSEA, 300), 1.0f)
