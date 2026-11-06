@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "food",
+  "ingredients": [
+    {
+      "item": "minecraft:bowl"
+    },
+    {
+      "item": "realshrooms:chanterelle"
+    },
+    {
+      "item": "realshrooms:porcini"
+    }
+  ],
+  "result": {
+    "item": "minecraft:mushroom_stew"
+  }
+}
