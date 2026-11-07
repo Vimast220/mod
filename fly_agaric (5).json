@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:block/cross",
+  "textures": {
+    "cross": "realshrooms:block/fly_agaric"
+  }
+}
