@@ -209,7 +209,7 @@ public class ShroomBlock extends PlantBlock implements Fertilizable {
             int count = 1 + world.random.nextInt(2) + (shears ? 1 : 0);
             Block.dropStack(world, pos, new ItemStack(Registries.ITEM.get(this.itemId), count));
             world.setBlockState(pos, state.with(AGE, shears ? 1 : 0), Block.NOTIFY_LISTENERS);
-            world.playSound(null, pos, SoundEvents.ITEM_SWEET_BERRIES_PICK_FROM_BUSH, SoundCategory.BLOCKS,
+            world.playSound(null, pos, SoundEvents.BLOCK_SWEET_BERRY_BUSH_PICK_BERRIES, SoundCategory.BLOCKS,
                 1.0f, 0.8f + world.random.nextFloat() * 0.4f);
             if (world instanceof ServerWorld serverWorld) {
                 serverWorld.spawnParticles(ParticleTypes.MYCELIUM,
