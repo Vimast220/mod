@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "top": "realshrooms:block/fly_agaric_mycelium_top_0",
+    "side": "realshrooms:block/mycelium_side_0",
+    "bottom": "minecraft:block/dirt"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "vigor=0": {
+      "model": "realshrooms:block/inky_cap_mycelium_0"
+    },
+    "vigor=1": {
+      "model": "realshrooms:block/inky_cap_mycelium_0"
+    },
+    "vigor=2": {
+      "model": "realshrooms:block/inky_cap_mycelium_0"
+    },
+    "vigor=3": {
+      "model": "realshrooms:block/inky_cap_mycelium_1"
+    },
+    "vigor=4": {
+      "model": "realshrooms:block/inky_cap_mycelium_1"
+    },
+    "vigor=5": {
+      "model": "realshrooms:block/inky_cap_mycelium_1"
+    },
+    "vigor=6": {
+      "model": "realshrooms:block/inky_cap_mycelium_2"
+    },
+    "vigor=7": {
+      "model": "realshrooms:block/inky_cap_mycelium_2"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "realshrooms:mycena_chlorophos"
+    },
+    {
+      "item": "realshrooms:mushroom_substrate"
+    }
+  ],
+  "result": {
+    "item": "realshrooms:mycena_chlorophos_mycelium"
+  }
+}

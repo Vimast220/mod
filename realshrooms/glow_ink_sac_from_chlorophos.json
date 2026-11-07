@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    {
+      "item": "minecraft:ink_sac"
+    },
+    {
+      "item": "realshrooms:mycena_chlorophos"
+    },
+    {
+      "item": "realshrooms:mycena_chlorophos"
+    }
+  ],
+  "result": {
+    "item": "minecraft:glow_ink_sac"
+  }
+}

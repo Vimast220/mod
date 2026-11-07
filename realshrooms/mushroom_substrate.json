@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "moist=false": {
+      "model": "realshrooms:block/mushroom_substrate"
+    },
+    "moist=true": {
+      "model": "realshrooms:block/mushroom_substrate_moist"
+    }
+  }
+}
