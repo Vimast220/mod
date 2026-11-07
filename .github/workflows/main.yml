@@ -5,18 +5,49 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: realshrooms
     steps:
       - uses: actions/checkout@v4
+
+      - name: Assemble project layout
+        run: |
+          set -e
+          P=proj
+          mkdir -p $P/gradle/wrapper $P/src/main/java/com/realshrooms $P/src/main/resources $P/tools
+          get() { find . -path "./$P" -prune -o -path ./.git -prune -o -type f -name "$1" -print | head -n 1; }
+          place() { f="$(get "$1")"; [ -n "$f" ] || { echo "Missing file: $1"; exit 1; }; cp "$f" "$2"; }
+          place build.gradle $P/
+          place gradle.properties $P/
+          place settings.gradle $P/
+          place gradlew $P/
+          place gradle-wrapper.jar $P/gradle/wrapper/
+          place gradle-wrapper.properties $P/gradle/wrapper/
+          for j in MyceliumBlock RealShrooms RealShroomsClient ShroomBlock SubstrateBlock; do
+            place $j.java $P/src/main/java/com/realshrooms/
+          done
+          place fabric.mod.json $P/src/main/resources/
+          place gen_assets.py $P/tools/
+          place gen_gardening.py $P/tools/
+          sed -i 's/\r$//' $P/gradlew
+          chmod +x $P/gradlew
+          find $P -type f | sort
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pillow
+      - name: Generate textures, models, recipes
+        run: python tools/gen_gardening.py
+        working-directory: proj
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
-      - run: chmod +x gradlew
-      - run: ./gradlew build
+      - name: Build
+        run: ./gradlew build
+        working-directory: proj
+
       - uses: actions/upload-artifact@v4
         with:
           name: realshrooms-jar
-          path: realshrooms/build/libs/*.jar
+          path: proj/build/libs/*.jar
