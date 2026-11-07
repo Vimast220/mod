@@ -1,8 +1,0 @@
-{
-  "parent": "minecraft:block/cube_bottom_top",
-  "textures": {
-    "top": "realshrooms:block/mycena_chlorophos_mycelium_top_1",
-    "side": "realshrooms:block/mycelium_side_1",
-    "bottom": "minecraft:block/dirt"
-  }
-}
