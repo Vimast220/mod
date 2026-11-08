@@ -21,9 +21,7 @@ jobs:
           place gradlew $P/
           place gradle-wrapper.jar $P/gradle/wrapper/
           place gradle-wrapper.properties $P/gradle/wrapper/
-          for j in MyceliumBlock RealShrooms RealShroomsClient ShroomBlock SubstrateBlock; do
-            place $j.java $P/src/main/java/com/realshrooms/
-          done
+                    find . -path "./$P" -prune -o -path ./.git -prune -o -type f -name '*.java' -print | while read -r f; do cp "$f" $P/src/main/java/com/realshrooms/; done
           place fabric.mod.json $P/src/main/resources/
           place gen_assets.py $P/tools/
           place gen_gardening.py $P/tools/
