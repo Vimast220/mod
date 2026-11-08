@@ -58,6 +58,21 @@ public class RealShrooms implements ModInitializer {
         return new FoodComponent.Builder().hunger(hunger).saturationModifier(saturation);
     }
 
+    /** Колонія ванільного гриба: свої блоки грибниці, а плодові тіла це ванільні гриби. */
+    private static void registerVanillaColony(String name, Identifier mushroom, MapColor color, MyceliumBlock.Diet diet) {
+        AbstractBlock.Settings settings = FabricBlockSettings.create();
+        settings = settings
+            .mapColor(color)
+            .strength(0.6f)
+            .sounds(BlockSoundGroup.GRAVEL)
+            .ticksRandomly();
+        Block block = new MyceliumBlock(settings, mushroom, diet, false);
+        Registry.register(Registries.BLOCK, id(name + "_mycelium"), block);
+        Item item = new BlockItem(block, new FabricItemSettings());
+        Registry.register(Registries.ITEM, id(name + "_mycelium"), item);
+        ITEMS.put(name + "_mycelium", item);
+    }
+
     @Override
     public void onInitialize() {
         List<Species> species = List.of(
@@ -199,6 +214,15 @@ public class RealShrooms implements ModInitializer {
         Item substrateItem = new BlockItem(SUBSTRATE, new FabricItemSettings());
         Registry.register(Registries.ITEM, id("mushroom_substrate"), substrateItem);
         ITEMS.put("mushroom_substrate", substrateItem);
+
+        // Ванільні гриби в нашій системі: свої колонії (коричневий: поглинає рослини, червоний: коріння дерев).
+        registerVanillaColony("brown_mushroom", new Identifier("minecraft", "brown_mushroom"),
+            MapColor.BROWN, MyceliumBlock.Diet.PLANTS);
+        registerVanillaColony("red_mushroom", new Identifier("minecraft", "red_mushroom"),
+            MapColor.RED, MyceliumBlock.Diet.ROOTS);
+
+        // Травоїдні тварини їдять гриби й грибницю.
+        GrazingHandler.register();
 
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.NATURAL).register(entries -> {
             for (Map.Entry<String, Item> e : ITEMS.entrySet()) {

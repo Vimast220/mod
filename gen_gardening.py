@@ -16,7 +16,9 @@ def w(path, data):
         else: json.dump(data, f, ensure_ascii=False, indent=2)
 
 SPECIES = ["chanterelle", "porcini", "morel", "fly_agaric", "death_cap", "inky_cap", "mycena_chlorophos"]
-MYC = [f"{MOD}:{x}_mycelium" for x in SPECIES]
+VANILLA = ["brown_mushroom", "red_mushroom"]   # колонії ванільних грибів (плодові тіла: minecraft:*)
+MYC_SPECIES = SPECIES + VANILLA
+MYC = [f"{MOD}:{x}_mycelium" for x in MYC_SPECIES]
 
 # ---------- стадії росту: зменшені «хрестики» ----------
 SCALES = [0.45, 0.75, 1.0]
@@ -143,7 +145,8 @@ merge_lang("en_us", en); merge_lang("uk_ua", uk)
 
 # ================= ГРИБНИЦЯ =================
 TINT = {"chanterelle": "F5C04A", "porcini": "A9703A", "morel": "B08B4F",
-        "fly_agaric": "E03A33", "death_cap": "A7AC50", "inky_cap": "9A9A9A", "mycena_chlorophos": "46C8FF"}
+        "fly_agaric": "E03A33", "death_cap": "A7AC50", "inky_cap": "9A9A9A", "mycena_chlorophos": "46C8FF",
+        "brown_mushroom": "A9703A", "red_mushroom": "E03A33"}
 
 def soil(rnd, base):
     img = Image.new("RGBA", (16, 16))
@@ -164,7 +167,7 @@ def hyphae(img, rnd, strands, tint, specks, white=(232, 232, 220, 255)):
 
 STRANDS = [3, 9, 18]; SPECKS = [0, 3, 6]
 tex_dir = f"{R}/assets/{MOD}/textures/block"
-for sid in SPECIES:
+for sid in MYC_SPECIES:
     for tier in range(3):
         rnd = random.Random(sum(map(ord, sid)) * 10 + tier)
         top = soil(rnd, (104, 80, 52)); hyphae(top, rnd, STRANDS[tier], TINT[sid], SPECKS[tier], white=(150, 225, 250, 255) if sid == "mycena_chlorophos" else (232, 232, 220, 255))
@@ -185,8 +188,10 @@ NAMES = {"chanterelle": ("Chanterelle Mycelium", "Грибниця лисичк�
          "fly_agaric": ("Fly Agaric Mycelium", "Грибниця мухомора"),
          "death_cap": ("Death Cap Mycelium", "Грибниця блідої поганки"),
          "inky_cap": ("Inky Cap Mycelium", "Грибниця гнойовика"),
-         "mycena_chlorophos": ("Mycena Chlorophos Mycelium", "Грибниця мицени хлорофос")}
-for sid in SPECIES:
+         "mycena_chlorophos": ("Mycena Chlorophos Mycelium", "Грибниця мицени хлорофос"),
+         "brown_mushroom": ("Brown Mushroom Mycelium", "Грибниця коричневого гриба"),
+         "red_mushroom": ("Red Mushroom Mycelium", "Грибниця червоного гриба")}
+for sid in MYC_SPECIES:
     b = f"{sid}_mycelium"
     for tier in range(3):
         w(f"{R}/assets/{MOD}/models/block/{b}_{tier}.json", {
@@ -206,17 +211,28 @@ for sid in SPECIES:
             {"type": "minecraft:item", "name": "minecraft:dirt"}]}]}]})
     # посів: гриб + субстрат = шматок грибниці
     w(f"{R}/data/{MOD}/recipes/{b}.json", {"type": "minecraft:crafting_shapeless", "category": "misc",
-        "ingredients": [{"item": f"{MOD}:{sid}"}, {"item": f"{MOD}:mushroom_substrate"}],
+        "ingredients": [{"item": (f"{MOD}:{sid}" if sid in SPECIES else f"minecraft:{sid}")}, {"item": f"{MOD}:mushroom_substrate"}],
         "result": {"item": f"{MOD}:{b}"}})
     en2[f"block.{MOD}.{b}"], uk2[f"block.{MOD}.{b}"] = NAMES[sid]
     k = f"tooltip.{MOD}.{b}"
     en2[f"{k}.1"], uk2[f"{k}.1"] = "A living network. A ripe mushroom on top feeds it.", "Живий організм. Його годує стиглий гриб згори."
-    if sid in ("inky_cap", "morel", "mycena_chlorophos"):
+    if sid in ("inky_cap", "morel", "mycena_chlorophos", "brown_mushroom"):
         en2[f"{k}.2"], uk2[f"{k}.2"] = "Devours plants around it: grass, flowers, saplings.", "Поглинає рослини навколо: траву, квіти, саджанці."
     else:
         en2[f"{k}.2"], uk2[f"{k}.2"] = "Lives in tree roots, feeds on water and soil. Dies without trees.", "Живе в корінні дерев, живиться водою й ґрунтом. Без дерев гине."
     en2[f"{k}.3"], uk2[f"{k}.3"] = "Spreads over soil, fruits at its edge. Silk Touch moves it.", "Захоплює ґрунт, плодоносить на краю. Шовковий дотик переносить."
+    en2[f"{k}.4"], uk2[f"{k}.4"] = "Earns points from food, spends them on upgrades and war. Empty hand: inspect.", "Заробляє очки з їжі, витрачає на апгрейди й війни. Порожня рука: оглянути."
+en2[f"message.{MOD}.colony"] = "%s | points: %s | Expansion %s, Fruiting %s, Resilience %s, Aggression %s | block vigor %s"
+uk2[f"message.{MOD}.colony"] = "%s | очки: %s | Експансія %s, Плодоношення %s, Стійкість %s, Агресія %s | сила блока %s"
+en2[f"message.{MOD}.upgrade"] = "%s upgraded: %s (level %s)"
+uk2[f"message.{MOD}.upgrade"] = "%s розвинула: %s (рівень %s)"
+for up, (e_name, u_name) in {"expansion": ("Expansion", "Експансія"), "fruiting": ("Fruiting", "Плодоношення"),
+                             "resilience": ("Resilience", "Стійкість"), "aggression": ("Aggression", "Агресія")}.items():
+    en2[f"upgrade.{MOD}.{up}"], uk2[f"upgrade.{MOD}.{up}"] = e_name, u_name
 merge_lang("en_us", en2); merge_lang("uk_ua", uk2)
+
+# ванільні гриби ростуть на нашій грибниці за будь-якого освітлення (як на ванільній)
+w(f"{R}/data/minecraft/tags/blocks/mushroom_grow_block.json", {"replace": False, "values": MYC})
 
 # перевірка JSON
 for root, _, files in os.walk(R):

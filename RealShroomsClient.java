@@ -17,14 +17,14 @@ public class RealShroomsClient implements ClientModInitializer {
         RealShrooms.BLOCKS.values().forEach(block ->
             BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getCutout()));
 
-        // Підказки про вирощування (tooltip.realshrooms.<id>.1 ... .3).
+        // Підказки про вирощування (tooltip.realshrooms.<id>.1 ... .4).
         ItemTooltipCallback.EVENT.register((stack, context, lines) -> {
             Identifier key = Registries.ITEM.getId(stack.getItem());
             if (!key.getNamespace().equals(RealShrooms.MOD_ID)) {
                 return;
             }
             String base = "tooltip." + key.getNamespace() + "." + key.getPath();
-            for (int i = 1; i <= 3; i++) {
+            for (int i = 1; i <= 4; i++) {
                 String line = base + "." + i;
                 if (I18n.hasTranslation(line)) {
                     lines.add(Text.translatable(line).formatted(Formatting.GRAY));
