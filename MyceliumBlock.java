@@ -14,11 +14,13 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.Fertilizable;
 import net.minecraft.block.SaplingBlock;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.SpiderEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.BlockTags;
+import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.StateManager;
@@ -29,6 +31,7 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.world.World;
@@ -37,18 +40,16 @@ import net.minecraft.world.WorldView;
 /**
  * Грибниця: живий організм із трьох видів блоків (для кожного виду гриба):
  *
- *  - ГОЛОВНА грибниця (CORE): «мозок» колонії. Одна на колонію. Вона розвиває колонію (апгрейди),
- *    тримається, поки є очки, і міцно захищена. Втративши її, колонія «безголова», і найсильніший вузол
- *    може стати новою головною.
- *  - ВУЗОЛ (NODE): стійкий вузол мережі. Передає силу далі, дає плодові тіла, збирає ресурси.
- *  - ГІФИ (HYPHA): найбільша частина. Досліджують нові місця, захоплюють інші блоки світу, збирають ресурси,
- *    але нестабільні: живуть недовго, швидко слабшають без зв'язку з вузлами, при смерті повертають блок.
+ *  - ГОЛОВНА (CORE): «мозок» колонії. Розвиває її (апгрейди), міцно захищена. Втративши її, колонія
+ *    «безголова», і найсильніший вузол може стати новою головною.
+ *  - ВУЗОЛ (NODE): стійкий вузол мережі. Передає силу, дає плодові тіла, збирає ресурси.
+ *  - ГІФИ (HYPHA): найбільша частина. Досліджують нові місця, захоплюють блоки світу, збирають ресурси.
+ *    Нестабільні, але, знайшовши ресурс (рослини, дерево, воду), ЗАКРІПЛЮЮТЬСЯ: стають вузлом.
  *
- * Блок грибниці зберігає «хазяїна» (HOST): захоплений блок світу, на який вона схожа і який лишається,
- * коли грибниця гине.
- *
- * Сила (VIGOR, 0..7) розтікається мережею як рівень світла. Очки колонії (ColonyData) заробляються
- * з їжі, витрачаються на утримання, захоплення блоків, плодоношення, війни й апгрейди.
+ * Блок зберігає «хазяїна» (HOST): захоплений блок світу, на який він схожий і який повертається, коли
+ * грибниця гине. Сила (VIGOR 0..7) розтікається мережею (-1 за блок; гіфи не сильніші за 5).
+ * Очки колонії (ColonyData) заробляються з їжі, витрачаються на утримання, захоплення, плодоношення,
+ * війни й апгрейди; сусідні області одного виду діляться очками.
  */
 public class MyceliumBlock extends Block implements Fertilizable {
     public enum Diet { ROOTS, PLANTS, PARASITE }
@@ -68,10 +69,10 @@ public class MyceliumBlock extends Block implements Fertilizable {
     }
 
     public static final int MAX_VIGOR = 7;
+    public static final int HYPHA_MAX_VIGOR = 5;
     public static final IntProperty VIGOR = IntProperty.of("vigor", 0, MAX_VIGOR);
     public static final EnumProperty<Host> HOST = EnumProperty.of("host", Host.class);
 
-    /** Усі зареєстровані блоки грибниці: за видом і частиною. */
     private static final Map<String, EnumMap<Part, MyceliumBlock>> BY_SPECIES = new HashMap<>();
     public static final List<MyceliumBlock> ALL = new ArrayList<>();
 
@@ -108,6 +109,10 @@ public class MyceliumBlock extends Block implements Fertilizable {
         return this.part;
     }
 
+    private boolean isMold() {
+        return species().equals("penicillium");
+    }
+
     @Override
     protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
         builder.add(VIGOR, HOST);
@@ -122,17 +127,21 @@ public class MyceliumBlock extends Block implements Fertilizable {
         ColonyData data = ColonyData.get(world);
         String key = ColonyData.key(species, pos);
         ColonyData.Colony colony = data.colony(key);
-        Part part = colony.hasCore ? Part.NODE : Part.CORE;
+        Part part = data.effectiveHasCore(species, pos) ? Part.NODE : Part.CORE;
         MyceliumBlock block = of(species, part);
         if (block == null) {
             return;
         }
-        world.setBlockState(pos, block.getDefaultState().with(VIGOR, 5).with(HOST, Host.DIRT), Block.NOTIFY_LISTENERS);
+        Host host = Host.of(world.getBlockState(pos));
+        if (host == null) {
+            host = Host.DIRT;
+        }
+        world.setBlockState(pos, block.getDefaultState().with(VIGOR, 5).with(HOST, host), Block.NOTIFY_LISTENERS);
         if (part == Part.CORE) {
             colony.hasCore = true;
         }
         colony.size++;
-        colony.points = Math.max(colony.points, 3);
+        colony.points = Math.max(colony.points, 8);
         data.markDirty();
     }
 
@@ -145,7 +154,7 @@ public class MyceliumBlock extends Block implements Fertilizable {
             ColonyData.Colony colony = data.colony(ColonyData.key(species(), pos));
             colony.hasCore = true;
             colony.size++;
-            colony.points = Math.max(colony.points, 6);
+            colony.points = Math.max(colony.points, 20);
             data.markDirty();
         }
     }
@@ -157,18 +166,21 @@ public class MyceliumBlock extends Block implements Fertilizable {
     @Override
     public void randomTick(BlockState state, ServerWorld world, BlockPos pos, Random random) {
         ColonyData data = ColonyData.get(world);
-        String key = ColonyData.key(species(), pos);
+        String species = species();
+        String key = ColonyData.key(species, pos);
         ColonyData.Colony colony = data.colony(key);
-        int expansion = colony.levels[ColonyData.EXPANSION];
-        int fruiting = colony.levels[ColonyData.FRUITING];
-        int resilience = colony.levels[ColonyData.RESILIENCE];
-        int aggression = colony.levels[ColonyData.AGGRESSION];
+        // Рівні й «мозок» беруться з усієї округи: колонія не обривається на межі області.
+        int[] levels = data.effectiveLevels(species, pos);
+        int expansion = levels[ColonyData.EXPANSION];
+        int fruiting = levels[ColonyData.FRUITING];
+        int resilience = levels[ColonyData.RESILIENCE];
+        int aggression = levels[ColonyData.AGGRESSION];
+        boolean hasCore = data.effectiveHasCore(species, pos);
 
         boolean parasite = this.diet == Diet.PARASITE && ShroomConfig.parasiteEnabled;
         boolean treeDiet = this.diet != Diet.PLANTS;
         boolean wet = world.hasRain(pos.up()) || SubstrateBlock.hasWaterNearby(world, pos);
         boolean dormant = isDormant(world, pos);
-        // Грибниця на корінні (і паразит) живе лише поруч із деревами; вологолюбна потребує вологи.
         boolean hostOk = (!treeDiet || hasHostTree(world, pos)) && (!this.needsMoisture || wet);
         int vigor = state.get(VIGOR);
 
@@ -182,12 +194,10 @@ public class MyceliumBlock extends Block implements Fertilizable {
                 earned += 1;
             }
             if (this.part == Part.CORE) {
-                // Серце тримається, поки є очки в запасі.
                 if (colony.points > 0) {
                     target = MAX_VIGOR;
                 }
             } else if (this.part == Part.NODE && treeDiet) {
-                // Вузли на корінні: вода й ґрунт дають базове живлення, у вологу пору більше.
                 target = Math.max(target, wet ? 4 : 2);
             }
             if (treeDiet && !parasite && this.part != Part.CORE && wet && random.nextInt(3) == 0
@@ -196,21 +206,31 @@ public class MyceliumBlock extends Block implements Fertilizable {
                 earned += 1;
             }
             if (!treeDiet && this.part != Part.CORE && graze(world, pos, random)) {
-                // Гіфи й вузли поглинають рослини: різкий приплив енергії.
                 vigor = Math.min(MAX_VIGOR, vigor + 3);
                 target = MAX_VIGOR;
                 earned += 2;
+            }
+            // Гібеллула: печерний гриб, паразит павуків.
+            if (species.equals("gibellula") && this.part != Part.CORE) {
+                List<SpiderEntity> spiders = world.getEntitiesByClass(SpiderEntity.class,
+                    new Box(pos).expand(2.5), spider -> spider.isAlive());
+                for (SpiderEntity spider : spiders) {
+                    spider.damage(world.getDamageSources().magic(), 3.0f);
+                    earned += spider.isAlive() ? 1 : 5;
+                    target = MAX_VIGOR;
+                }
             }
             for (BlockPos nearby : BlockPos.iterate(pos.add(-1, -1, -1), pos.add(1, 1, 1))) {
                 if (nearby.equals(pos)) {
                     continue;
                 }
                 BlockState neighbour = world.getBlockState(nearby);
-                if (neighbour.getBlock() instanceof MyceliumBlock other && other.species().equals(species())) {
-                    // Гіфи передають силу гірше: -2 за блок, а вузли й серце -1.
-                    int loss = (this.part == Part.HYPHA || other.part == Part.HYPHA) ? 2 : 1;
-                    target = Math.max(target, neighbour.get(VIGOR) - loss);
+                if (neighbour.getBlock() instanceof MyceliumBlock other && other.species().equals(species)) {
+                    target = Math.max(target, neighbour.get(VIGOR) - 1);
                 }
+            }
+            if (this.part == Part.HYPHA) {
+                target = Math.min(target, HYPHA_MAX_VIGOR);
             }
         }
         if (earned > 0) {
@@ -220,24 +240,35 @@ public class MyceliumBlock extends Block implements Fertilizable {
         // ---- 2. Утримання: великий організм дорого коштує. Без очок блок слабшає. ----
         if (!dormant) {
             double base = switch (this.part) {
-                case CORE -> 4.0;
-                case NODE -> 3.0;
-                case HYPHA -> 6.0;
+                case CORE -> 5.0;
+                case NODE -> 4.0;
+                case HYPHA -> 8.0;
             };
             base -= aggression * 0.5;
             if (this.part == Part.NODE) {
                 base -= fruiting * 0.5;
             }
-            int upkeep = (int) Math.max(1, Math.round(base / ShroomConfig.upkeepScale));
-            if (random.nextInt(upkeep) == 0 && !data.spend(key, 1)) {
-                target = Math.min(target, 0);
+            if (isMold()) {
+                base *= 1.5;   // пліснява невибаглива
+            }
+            int upkeep = (int) Math.max(2, Math.round(base / ShroomConfig.upkeepScale));
+            if (random.nextInt(upkeep) == 0 && !data.spendShared(species, pos, 1)) {
+                // Банкрутство: гіфи гинуть першими, вузли й серце лише слабшають.
+                target = this.part == Part.HYPHA ? -1 : Math.min(target, 0);
             }
         }
 
-        // ---- 3. Нестабільні гіфи: живуть недовго, повертаючи блок хазяїна ----
+        // ---- 3. Нестабільні гіфи: живуть недовго, особливо відрізані від мережі ----
         if (this.part == Part.HYPHA && !dormant) {
-            int lifespan = (int) Math.max(6, Math.round((16 + 3 * resilience - 2 * expansion) * ShroomConfig.hyphaLifespan));
-            if (random.nextInt(lifespan) == 0) {
+            double lifespan = 36 + 6 * resilience - 3 * expansion;
+            if (isMold()) {
+                lifespan *= 0.6;   // пліснява швидка й недовговічна
+            }
+            if (vigor <= 1) {
+                lifespan /= 3.0;
+            }
+            int denominator = (int) Math.max(6, Math.round(lifespan * ShroomConfig.hyphaLifespan));
+            if (random.nextInt(denominator) == 0) {
                 die(world, pos, state);
                 return;
             }
@@ -261,7 +292,7 @@ public class MyceliumBlock extends Block implements Fertilizable {
             world.setBlockState(pos, state, Block.NOTIFY_LISTENERS);
         }
 
-        // ---- 5. Мозок: головна грибниця розвиває колонію ----
+        // ---- 5. Мозок ----
         if (this.part == Part.CORE) {
             coreBrain(world, pos, data, key, colony);
         }
@@ -269,11 +300,11 @@ public class MyceliumBlock extends Block implements Fertilizable {
             return;
         }
 
-        String strategy = ColonyData.strategy(colony);
+        String strategy = ColonyData.strategy(colony, hasCore);
 
         // ---- 6. Дослідження й захоплення блоків (переважно гіфи) ----
-        if (newVigor >= 3) {
-            double chance = (wet ? 3 : 6) - expansion + resilience / 2.0;
+        if (newVigor >= 2) {
+            double chance = (wet ? 2 : 4) - expansion / 2.0 + resilience / 2.0;
             if (this.part != Part.HYPHA) {
                 chance *= 3;
             }
@@ -284,7 +315,7 @@ public class MyceliumBlock extends Block implements Fertilizable {
             }
             int denominator = (int) Math.max(1, Math.round(chance / ShroomConfig.spreadSpeed));
             if (random.nextInt(denominator) == 0) {
-                explore(world, pos, newVigor, random, data, key, colony, aggression);
+                explore(world, pos, newVigor, random, data, key, colony, aggression, treeDiet);
             }
         }
 
@@ -294,19 +325,22 @@ public class MyceliumBlock extends Block implements Fertilizable {
             int fruitChance = Math.max(2, (wet ? 4 : 8) - fruiting);
             if (newVigor >= 3 && newVigor <= maxFruitVigor && colony.points > 0 && random.nextInt(fruitChance) == 0) {
                 if (fruit(world, pos)) {
-                    data.spend(key, 1);
+                    data.spendShared(species, pos, 1);
                 }
             }
         }
 
-        // ---- 8. Розвиток: гіфа вирости у вузол, вузол у нову головну грибницю ----
-        if (this.part == Part.HYPHA && newVigor >= 4 && colony.points >= 3 && random.nextInt(10) == 0
-            && !hasNodeNearby(world, pos)) {
-            data.spend(key, 3);
-            changePart(world, pos, state, Part.NODE);
-        } else if (this.part == Part.NODE && !colony.hasCore && newVigor >= 5 && colony.points >= 5
-            && random.nextInt(4) == 0) {
-            data.spend(key, 5);
+        // ---- 8. Закріплення: гіфа, що знайшла ресурс, стає вузлом (або вузол, що став далеким опорним) ----
+        if (this.part == Part.HYPHA) {
+            int rich = resourceScore(world, pos, treeDiet);
+            boolean anchor = rich >= 3 && newVigor >= 2 && !hasNodeNearby(world, pos, 3);
+            boolean relay = newVigor >= 4 && !hasNodeNearby(world, pos, 5);
+            if (((anchor && random.nextInt(4) == 0) || (relay && random.nextInt(10) == 0))
+                && data.spendShared(species, pos, 3)) {
+                changePart(world, pos, state, Part.NODE);
+            }
+        } else if (this.part == Part.NODE && !hasCore && newVigor >= 5 && colony.points >= 5
+            && random.nextInt(4) == 0 && data.spendShared(species, pos, 5)) {
             changePart(world, pos, state, Part.CORE);
             colony.hasCore = true;
             data.markDirty();
@@ -339,6 +373,12 @@ public class MyceliumBlock extends Block implements Fertilizable {
         if (colony.contact > 0) {
             colony.contact--;
         }
+        // Серце виправляє лічильник розміру за справжнім (кількість зв'язаних блоків).
+        ColonyScanner.Result real = ColonyScanner.scan(world, pos, 1500, false);
+        if (real != null) {
+            colony.size = real.count;
+            data.markDirty();
+        }
         int bought = data.tryUpgrade(key, ColonyData.dynamicPriority(species(), colony));
         if (bought >= 0) {
             announce(world, pos, bought, colony.levels[bought]);
@@ -347,14 +387,12 @@ public class MyceliumBlock extends Block implements Fertilizable {
 
     private boolean isFed(ServerWorld world, BlockPos pos) {
         BlockState above = world.getBlockState(pos.up());
-        // Великі ванільні гриби годують будь-яку грибницю.
         if (above.isOf(Blocks.MUSHROOM_STEM) || above.isOf(Blocks.RED_MUSHROOM_BLOCK) || above.isOf(Blocks.BROWN_MUSHROOM_BLOCK)) {
             return true;
         }
         if (!above.isOf(Registries.BLOCK.get(this.mushroomId))) {
             return false;
         }
-        // Наші гриби мають стадії росту, ванільні завжди «стиглі».
         return !above.contains(ShroomBlock.AGE) || above.get(ShroomBlock.AGE) == 2;
     }
 
@@ -381,6 +419,8 @@ public class MyceliumBlock extends Block implements Fertilizable {
             || state.isOf(Blocks.LARGE_FERN)
             || state.isOf(Blocks.DEAD_BUSH)
             || state.isOf(Blocks.SWEET_BERRY_BUSH)
+            || state.isOf(Blocks.MOSS_CARPET)
+            || state.isOf(Blocks.SMALL_DRIPLEAF)
             || state.isOf(Blocks.BROWN_MUSHROOM)
             || state.isOf(Blocks.RED_MUSHROOM);
     }
@@ -400,18 +440,42 @@ public class MyceliumBlock extends Block implements Fertilizable {
         return false;
     }
 
-    private boolean hasNodeNearby(ServerWorld world, BlockPos pos) {
-        for (BlockPos nearby : BlockPos.iterate(pos.add(-4, -2, -4), pos.add(4, 2, 4))) {
+    private boolean hasNodeNearby(ServerWorld world, BlockPos pos, int radius) {
+        for (BlockPos nearby : BlockPos.iterate(pos.add(-radius, -2, -radius), pos.add(radius, 2, radius))) {
             if (nearby.equals(pos)) {
                 continue;
             }
-            BlockState other = world.getBlockState(nearby);
-            if (other.getBlock() instanceof MyceliumBlock block && block.species().equals(species())
-                && block.part != Part.HYPHA) {
+            if (world.getBlockState(nearby).getBlock() instanceof MyceliumBlock block
+                && block.species().equals(species()) && block.part != Part.HYPHA) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Скільки ресурсів поряд: рослини (або дерева для кореневих видів) і вода. Чим більше, тим «ситніше» місце. */
+    private int resourceScore(ServerWorld world, BlockPos center, boolean treeDiet) {
+        int score = 0;
+        for (BlockPos nearby : BlockPos.iterate(center.add(-3, -1, -3), center.add(3, 2, 3))) {
+            BlockState state = world.getBlockState(nearby);
+            if (treeDiet ? state.isIn(BlockTags.LOGS) : isPrey(state)) {
+                score++;
+            } else if (world.getFluidState(nearby).isIn(FluidTags.WATER)) {
+                score++;
+            }
+        }
+        return Math.min(8, score);
+    }
+
+    private int ownNeighbours(ServerWorld world, BlockPos pos) {
+        int count = 0;
+        for (BlockPos nearby : BlockPos.iterate(pos.add(-1, -1, -1), pos.add(1, 1, 1))) {
+            if (world.getBlockState(nearby).getBlock() instanceof MyceliumBlock block
+                && block.species().equals(species())) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // =====================================================================
@@ -420,40 +484,55 @@ public class MyceliumBlock extends Block implements Fertilizable {
 
     /** Скільки очок коштує освоїти хазяїна цього виду; 0 = вид не вміє. */
     private static int hostCost(String species, Host host) {
+        if (host == Host.HAY) {
+            return species.equals("penicillium") ? 1 : 0;
+        }
+        Host.Kind kind = host.kind();
         return switch (species) {
-            case "mycena_chlorophos" -> switch (host) {
+            case "mycena_chlorophos" -> switch (kind) {
                 case WOOD -> 1;
-                case DIRT -> 2;
-                case STONE -> 3;
+                case SOIL -> 2;
+                case ROCK -> 3;
                 default -> 0;
             };
-            case "honey_fungus" -> switch (host) {
+            case "honey_fungus" -> switch (kind) {
                 case WOOD -> 1;
-                case DIRT -> 2;
-                case SAND -> 3;
+                case SOIL -> 2;
+                case LOOSE -> 3;
                 default -> 0;
             };
-            case "morel" -> switch (host) {
-                case DIRT, SAND -> 1;
-                case GRAVEL, WOOD -> 2;
-                case STONE -> 3;
+            case "gibellula" -> switch (kind) {
+                case ROCK, DEEP -> 1;
+                case SOIL -> 2;
+                case WOOD -> 3;
                 default -> 0;
             };
-            case "inky_cap", "brown_mushroom" -> switch (host) {
-                case DIRT, WOOD -> 1;
-                case SAND, GRAVEL -> 2;
-                case STONE -> 3;
+            case "penicillium" -> switch (kind) {
+                case WOOD, SOIL -> 1;
+                case ROCK, LOOSE -> 2;
                 default -> 0;
             };
-            case "death_cap" -> switch (host) {
-                case DIRT, WOOD -> 1;
-                case SAND -> 3;
+            case "morel" -> switch (kind) {
+                case SOIL -> 1;
+                case LOOSE, WOOD -> 2;
+                case ROCK -> 3;
                 default -> 0;
             };
-            default -> switch (host) {
-                case DIRT -> 1;
+            case "death_cap" -> switch (kind) {
+                case SOIL, WOOD -> 1;
+                case LOOSE -> 3;
+                default -> 0;
+            };
+            case "inky_cap", "brown_mushroom" -> switch (kind) {
+                case SOIL, WOOD -> 1;
+                case LOOSE -> 2;
+                case ROCK -> 3;
+                default -> 0;
+            };
+            default -> switch (kind) {
+                case SOIL -> 1;
                 case WOOD -> 2;
-                case SAND, GRAVEL -> 3;
+                case LOOSE -> 3;
                 default -> 0;
             };
         };
@@ -461,26 +540,28 @@ public class MyceliumBlock extends Block implements Fertilizable {
 
     /** Чи може ця частина грибниці взагалі захопити такого хазяїна (з урахуванням конфігу). */
     private boolean hostAllowed(Host host) {
-        // Серце й вузли захоплюють лише м'який ґрунт. Камінь, гравій і деревину беруть гіфи.
-        if (this.part != Part.HYPHA && host != Host.DIRT && host != Host.SAND) {
+        Host.Kind kind = host.kind();
+        // Серце й вузли захоплюють лише м'який ґрунт і пісок. Камінь, гравій, деревину, сіно беруть гіфи.
+        if (this.part != Part.HYPHA && kind != Host.Kind.SOIL && host != Host.SAND) {
             return false;
         }
-        return switch (host) {
-            case STONE, DEEPSLATE -> ShroomConfig.captureStone;
+        return switch (kind) {
+            case ROCK, DEEP -> ShroomConfig.captureStone;
             case WOOD -> ShroomConfig.captureWood;
-            case SAND, GRAVEL -> ShroomConfig.captureSand;
-            default -> true;
+            case LOOSE -> ShroomConfig.captureSand;
+            case ORGANIC -> ShroomConfig.moldEatsHay;
+            case SOIL -> true;
         };
     }
 
-    /** Наскільки приваблива ціль для експансії: їжа поруч, дешевий хазяїн, слабкий ворог. */
-    private int scoreTarget(ServerWorld world, BlockPos target, int aggression) {
+    /** Наскільки приваблива ціль: дешевий хазяїн, ресурси поруч, їжа над блоком, слабкий ворог. */
+    private int scoreTarget(ServerWorld world, BlockPos target, int aggression, boolean treeDiet) {
         BlockState state = world.getBlockState(target);
         if (state.getBlock() instanceof MyceliumBlock other) {
             if (other.species().equals(species()) || !ShroomConfig.warEnabled) {
                 return -100;
             }
-            return 2 + aggression;
+            return 2 + aggression + (isMold() ? 1 : 0);
         }
         if (state.isOf(Blocks.MYCELIUM)) {
             return 1;
@@ -494,21 +575,24 @@ public class MyceliumBlock extends Block implements Fertilizable {
             return -100;
         }
         int score = 6 - cost * 2;
+        score += Math.min(5, resourceScore(world, target, treeDiet));
         if (isPrey(world.getBlockState(target.up()))) {
-            score += 3;
+            score += 2;
         }
-        if (this.diet == Diet.PARASITE && host == Host.WOOD) {
+        if (this.diet == Diet.PARASITE && host.kind() == Host.Kind.WOOD) {
             score += 6;
         }
+        // Гіфи тяжіють до краю колонії, а не до центру.
+        score -= ownNeighbours(world, target) / 4;
         return score;
     }
 
-    /** Напрямлений ріст: з кількох випадкових кандидатів гіфа обирає найкращого. */
+    /** Напрямлений ріст: з кількох кандидатів гіфа обирає найкращого, тобто росте до ресурсу. */
     private void explore(ServerWorld world, BlockPos pos, int vigor, Random random, ColonyData data, String key,
-                         ColonyData.Colony colony, int aggression) {
+                         ColonyData.Colony colony, int aggression, boolean treeDiet) {
         BlockPos best = null;
         int bestScore = Integer.MIN_VALUE;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             int dx = random.nextInt(3) - 1;
             int dy = random.nextInt(3) - 1;
             int dz = random.nextInt(3) - 1;
@@ -516,7 +600,7 @@ public class MyceliumBlock extends Block implements Fertilizable {
                 continue;
             }
             BlockPos candidate = pos.add(dx, dy, dz);
-            int score = scoreTarget(world, candidate, aggression);
+            int score = scoreTarget(world, candidate, aggression, treeDiet);
             if (score > bestScore) {
                 bestScore = score;
                 best = candidate;
@@ -532,14 +616,12 @@ public class MyceliumBlock extends Block implements Fertilizable {
                          ColonyData data, String key, ColonyData.Colony colony, int aggression) {
         BlockState targetState = world.getBlockState(target);
 
-        // Війна з грибницею іншого виду.
         if (targetState.getBlock() instanceof MyceliumBlock other) {
             if (!other.species().equals(species()) && ShroomConfig.warEnabled) {
                 fight(world, pos, vigor, target, targetState, other, random, data, key, colony, aggression);
             }
             return;
         }
-        // Ванільна грибниця: слабкий нейтральний захисник.
         if (targetState.isOf(Blocks.MYCELIUM)) {
             if (vigor + 2 * aggression + random.nextInt(3) > 4 + random.nextInt(3)) {
                 place(world, target, Host.DIRT, Part.HYPHA, vigor, data, colony);
@@ -558,13 +640,13 @@ public class MyceliumBlock extends Block implements Fertilizable {
         if (this.diet != Diet.PLANTS && !hasHostTree(world, target)) {
             return;
         }
-        if (!data.spend(key, cost)) {
+        if (!data.spendShared(species(), pos, cost)) {
             return;
         }
         place(world, target, host, Part.HYPHA, vigor, data, colony);
 
         // Добування ресурсів: тліюча деревина годує, паразит убиває дерево й отримує багато.
-        if (host == Host.WOOD) {
+        if (host.kind() == Host.Kind.WOOD) {
             int gain = (this.diet == Diet.PARASITE && ShroomConfig.parasiteEnabled) ? 6 : (this.diet == Diet.PLANTS ? 2 : 0);
             if (gain > 0) {
                 data.addPoints(key, gain);
@@ -572,7 +654,6 @@ public class MyceliumBlock extends Block implements Fertilizable {
         }
     }
 
-    /** Ставить блок цього виду з вибраною частиною на місце захопленого блока. */
     private void place(ServerWorld world, BlockPos target, Host host, Part newPart, int vigor,
                        ColonyData data, ColonyData.Colony colony) {
         MyceliumBlock block = of(species(), newPart);
@@ -589,7 +670,7 @@ public class MyceliumBlock extends Block implements Fertilizable {
                        MyceliumBlock other, Random random, ColonyData data, String key,
                        ColonyData.Colony attackerColony, int aggression) {
         // Напад коштує очко: без запасів колонія не воює.
-        if (!data.spend(key, 1)) {
+        if (!data.spendShared(species(), pos, 1)) {
             return;
         }
         String otherKey = ColonyData.key(other.species(), target);
@@ -602,13 +683,12 @@ public class MyceliumBlock extends Block implements Fertilizable {
             case NODE -> 1;
             case HYPHA -> 0;
         };
-        // Захисник може вкласти очко, щоб підсилитись.
+        int[] defenderLevels = data.effectiveLevels(other.species(), target);
         int reinforce = (defender.points > 0 && data.spend(otherKey, 1)) ? 2 : 0;
-        int attack = vigor + 2 * aggression + random.nextInt(3);
-        int defence = targetState.get(VIGOR) + 2 * defender.levels[ColonyData.RESILIENCE] + partBonus + reinforce + random.nextInt(3);
+        int attack = vigor + 2 * aggression + (isMold() ? 1 : 0) + random.nextInt(3);
+        int defence = targetState.get(VIGOR) + 2 * defenderLevels[ColonyData.RESILIENCE] + partBonus + reinforce + random.nextInt(3);
 
         if (attack > defence) {
-            // Перемога: блок захоплено (серце суперника стає вузлом), плодові тіла суперника в'януть.
             Part newPart = other.part == Part.CORE ? Part.NODE : other.part;
             Host host = targetState.get(HOST);
             place(world, target, host, newPart, vigor, data, attackerColony);
@@ -625,7 +705,6 @@ public class MyceliumBlock extends Block implements Fertilizable {
             world.spawnParticles(ParticleTypes.SPORE_BLOSSOM_AIR,
                 target.getX() + 0.5, target.getY() + 1.0, target.getZ() + 0.5, 8, 0.3, 0.2, 0.3, 0.01);
         } else {
-            // Поразка: нападник слабшає, захисник отримує очко.
             BlockState self = world.getBlockState(pos);
             if (self.isOf(this) && self.get(VIGOR) > 0) {
                 world.setBlockState(pos, self.with(VIGOR, self.get(VIGOR) - 1), Block.NOTIFY_LISTENERS);
@@ -667,7 +746,6 @@ public class MyceliumBlock extends Block implements Fertilizable {
         if (mushroom == Blocks.AIR) {
             return false;
         }
-        // Не більше 2 однакових грибів у радіусі 2 блоків.
         int count = 0;
         for (BlockPos nearby : BlockPos.iterate(pos.add(-2, 0, -2), pos.add(2, 1, 2))) {
             if (world.getBlockState(nearby).isOf(mushroom)) {
@@ -700,23 +778,27 @@ public class MyceliumBlock extends Block implements Fertilizable {
     //  Взаємодія гравця
     // =====================================================================
 
-    /** ПКМ порожньою рукою: оглянути колонію. */
+    /** ПКМ порожньою рукою: оглянути колонію (розмір реальний, порахований по зв'язаних блоках). */
     @Override
     public ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, Hand hand, BlockHitResult hit) {
         if (hand != Hand.MAIN_HAND || !player.getStackInHand(hand).isEmpty()) {
             return ActionResult.PASS;
         }
         if (world instanceof ServerWorld serverWorld) {
-            ColonyData.Colony colony = ColonyData.get(serverWorld).colony(ColonyData.key(species(), pos));
+            ColonyData data = ColonyData.get(serverWorld);
+            ColonyData.Colony colony = data.colony(ColonyData.key(species(), pos));
+            int[] levels = data.effectiveLevels(species(), pos);
+            ColonyScanner.Result real = ColonyScanner.scan(serverWorld, pos, 1500, false);
+            int size = real != null ? real.count : colony.size;
             player.sendMessage(Text.translatable("message.realshrooms.colony", this.getName(),
-                Text.translatable("strategy.realshrooms." + ColonyData.strategy(colony)),
-                colony.points, colony.size,
-                colony.levels[0], colony.levels[1], colony.levels[2], colony.levels[3], state.get(VIGOR)), false);
+                Text.translatable("strategy.realshrooms." + ColonyData.strategy(colony, data.effectiveHasCore(species(), pos))),
+                colony.points, size,
+                levels[0], levels[1], levels[2], levels[3], state.get(VIGOR)), false);
         }
         return ActionResult.success(world.isClient);
     }
 
-    // ---------- кісткове борошно: підживлює колонію і дає їй очки ----------
+    // ---------- кісткове борошно: підживлює колонію (віддача спадає) ----------
 
     @Override
     public boolean isFertilizable(WorldView world, BlockPos pos, BlockState state, boolean isClient) {
@@ -734,9 +816,14 @@ public class MyceliumBlock extends Block implements Fertilizable {
         world.setBlockState(pos, state.with(VIGOR, vigor), Block.NOTIFY_LISTENERS);
         ColonyData data = ColonyData.get(world);
         String key = ColonyData.key(species(), pos);
-        data.addPoints(key, 5);
         ColonyData.Colony colony = data.colony(key);
-        explore(world, pos, vigor, random, data, key, colony, colony.levels[ColonyData.AGGRESSION]);
+        // Спадна віддача: багата колонія майже не отримує очок від кісткового борошна.
+        int gain = colony.points < 20 ? 5 : (colony.points < 50 ? 2 : 0);
+        if (gain > 0) {
+            data.addPoints(key, gain);
+        }
+        int[] levels = data.effectiveLevels(species(), pos);
+        explore(world, pos, vigor, random, data, key, colony, levels[ColonyData.AGGRESSION], this.diet != Diet.PLANTS);
     }
 
     // ---------- візуально: жива грибниця «димить» спорами ----------

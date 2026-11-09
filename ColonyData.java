@@ -1,5 +1,6 @@
 package com.realshrooms;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -24,6 +25,8 @@ public class ColonyData extends PersistentState {
     public static final String[] UPGRADE_NAMES = {"expansion", "fruiting", "resilience", "aggression"};
 
     public static final int MAX_LEVEL = 3;
+    /** Усього рівнів апгрейдів на колонію (з 12): тож колонія спеціалізується, а не бере все. */
+    public static final int MAX_TOTAL_LEVELS = 7;
     public static final int MAX_POINTS = 200;
     public static final int MAX_FOOD = 60;
     private static final int START_FOOD = 30;
@@ -84,6 +87,78 @@ public class ColonyData extends PersistentState {
         return true;
     }
 
+    public Colony peek(String key) {
+        return this.colonies.get(key);
+    }
+
+    /** Усі відомі колонії (для відладки). */
+    public Map<String, Colony> all() {
+        return Collections.unmodifiableMap(this.colonies);
+    }
+
+    private static String[] neighbourKeys(String species, BlockPos pos) {
+        int rx = pos.getX() >> 5;
+        int rz = pos.getZ() >> 5;
+        String[] keys = new String[9];
+        int i = 0;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                keys[i++] = species + ":" + (rx + dx) + ":" + (rz + dz);
+            }
+        }
+        return keys;
+    }
+
+    /** Рівні апгрейдів, які діють у цій точці: найкращі серед своєї й сусідніх областей того ж виду. */
+    public int[] effectiveLevels(String species, BlockPos pos) {
+        int[] result = new int[4];
+        for (String key : neighbourKeys(species, pos)) {
+            Colony colony = this.colonies.get(key);
+            if (colony != null) {
+                for (int i = 0; i < 4; i++) {
+                    result[i] = Math.max(result[i], colony.levels[i]);
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Чи є головна грибниця в цій чи сусідніх областях (колонія не обривається на межі області). */
+    public boolean effectiveHasCore(String species, BlockPos pos) {
+        for (String key : neighbourKeys(species, pos)) {
+            Colony colony = this.colonies.get(key);
+            if (colony != null && colony.hasCore) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Витрачає очки своєї області, а коли їх бракує, позичає в багатшої сусідньої області того ж виду. */
+    public boolean spendShared(String species, BlockPos pos, int amount) {
+        if (spend(key(species, pos), amount)) {
+            return true;
+        }
+        String own = key(species, pos);
+        for (String key : neighbourKeys(species, pos)) {
+            if (key.equals(own)) {
+                continue;
+            }
+            Colony other = this.colonies.get(key);
+            if (other != null && other.points >= amount + 3) {
+                other.points -= amount;
+                this.markDirty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void resetFood() {
+        this.food.clear();
+        this.markDirty();
+    }
+
     /** Бере одиницю з поживного запасу області. Повертає false, якщо запас вичерпано. */
     public boolean takeFood(String regionKey) {
         int amount = this.food.getOrDefault(regionKey, START_FOOD);
@@ -110,6 +185,9 @@ public class ColonyData extends PersistentState {
     /** Купує перший доступний апгрейд за пріоритетом. Повертає номер апгрейда або -1. */
     public int tryUpgrade(String key, int[] priority) {
         Colony colony = colony(key);
+        if (colony.levels[0] + colony.levels[1] + colony.levels[2] + colony.levels[3] >= MAX_TOTAL_LEVELS) {
+            return -1;
+        }
         for (int upgrade : priority) {
             int level = colony.levels[upgrade];
             if (level < MAX_LEVEL && colony.points >= COST[level]) {
@@ -131,6 +209,8 @@ public class ColonyData extends PersistentState {
             case "fly_agaric", "red_mushroom", "honey_fungus" -> new int[]{AGGRESSION, EXPANSION, RESILIENCE, FRUITING};
             case "death_cap" -> new int[]{AGGRESSION, RESILIENCE, FRUITING, EXPANSION};
             case "mycena_chlorophos" -> new int[]{FRUITING, EXPANSION, RESILIENCE, AGGRESSION};
+            case "gibellula" -> new int[]{AGGRESSION, RESILIENCE, EXPANSION, FRUITING};
+            case "penicillium" -> new int[]{EXPANSION, AGGRESSION, FRUITING, RESILIENCE};
             case "brown_mushroom" -> new int[]{EXPANSION, RESILIENCE, FRUITING, AGGRESSION};
             default -> new int[]{EXPANSION, FRUITING, RESILIENCE, AGGRESSION};
         };
@@ -157,8 +237,8 @@ public class ColonyData extends PersistentState {
     }
 
     /** Поточна стратегія колонії (ключ для перекладу strategy.realshrooms.*). */
-    public static String strategy(Colony colony) {
-        if (!colony.hasCore) {
+    public static String strategy(Colony colony, boolean hasCore) {
+        if (!hasCore) {
             return "headless";
         }
         if (colony.points <= 1) {

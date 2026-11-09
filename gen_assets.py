@@ -63,6 +63,25 @@ ART["honey_fungus"] = ({'h':'EBCD6E','H':'D6AA46','d':'826028','s':'BE9F6E','S':
   "..sS...sS...",
   ".ssSs.ssSs.."])
 
+
+# Гібеллула: тонкі кремові стебла з жовтуватими булавами (синеми) на кінцях.
+ART["gibellula"] = ({'s':'E8E2CC','S':'C4BCA2','t':'F3EBB5','T':'D9CF8A'}, [
+  "..t...tt....",
+  ".tTt..tTt.t.",
+  "..s....s.tTt",
+  "..s....s..s.",
+  "..S...ss..s.",
+  "..s...sS..S.",
+  ".ssS.ssSs.ss"])
+
+# Пліснява: плаский синьо-зелений наліт.
+ART["penicillium"] = ({'b':'7FB8A8','B':'4E9C8C','G':'2E7A6A'}, [
+  "..bBb...bb..",
+  ".bBBBb.bBBb.",
+  "bBGGBBbBGGBb",
+  ".bBBBbbBBBb.",
+  "..bbb..bbb.."])
+
 def render(rows, pal, bottom):
     img = Image.new("RGBA",(16,16),(0,0,0,0))
     top = 16-len(rows) if bottom else (16-len(rows))//2
@@ -93,6 +112,8 @@ SPECIES = {  # id: (rarity chance, tries, en, uk)
  "inky_cap":    (5, 16, "Inky Cap", "Чорнильний гнойовик"),
  "mycena_chlorophos": (3, 30, "Mycena Chlorophos", "Мицена хлорофос"),
  "honey_fungus": (9, 14, "Honey Fungus", "Опеньок осінній"),
+ "gibellula": (6, 40, "Gibellula", "Гібеллула (павучий гриб)"),
+ "penicillium": (4, 24, "Penicillium", "Пліснява (пеніцил)"),
 }
 en = {}; uk = {}
 for sid,(rar,tries,e,u) in SPECIES.items():

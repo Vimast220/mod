@@ -43,11 +43,11 @@ public class RealShrooms implements ModInitializer {
 
     private record Species(String id, MapColor color, int width, int height, boolean needsTree,
                            FoodComponent food, List<RegistryKey<Biome>> biomes,
-                           int glow, boolean onWood, boolean humid) {
-        // Звичайний гриб: не світиться, росте на ґрунті, волога не обов'язкова.
+                           int glow, boolean onWood, boolean humid, boolean onStone, boolean needsDark) {
+        // Звичайний гриб: не світиться, росте на ґрунті, волога й темрява не обов'язкові.
         Species(String id, MapColor color, int width, int height, boolean needsTree,
                 FoodComponent food, List<RegistryKey<Biome>> biomes) {
-            this(id, color, width, height, needsTree, food, biomes, 0, false, false);
+            this(id, color, width, height, needsTree, food, biomes, 0, false, false, false, false);
         }
     }
 
@@ -163,7 +163,21 @@ public class RealShrooms implements ModInitializer {
                 null,
                 List.of(BiomeKeys.JUNGLE, BiomeKeys.SPARSE_JUNGLE, BiomeKeys.BAMBOO_JUNGLE,
                     BiomeKeys.MANGROVE_SWAMP, BiomeKeys.SWAMP),
-                5, true, true)
+                5, true, true, false, false),
+
+            // Гібеллула: печерний гриб, паразит павуків (реальний рід Gibellula, відомі й печерні види).
+            // Росте у темряві на камені, не потребує дерев; без біомів: генерується під землею.
+            new Species("gibellula", MapColor.LIGHT_GRAY, 7, 8, false,
+                null,
+                List.of(),
+                0, false, false, true, true),
+
+            // Пліснява (Penicillium): швидка, невибаглива, але недовговічна. Любить вологу, дерево й сіно.
+            new Species("penicillium", MapColor.CYAN, 10, 3, false,
+                null,
+                List.of(BiomeKeys.SWAMP, BiomeKeys.MANGROVE_SWAMP, BiomeKeys.JUNGLE, BiomeKeys.DARK_FOREST,
+                    BiomeKeys.FOREST),
+                0, true, true, false, false)
         );
 
         for (Species s : species) {
@@ -189,7 +203,7 @@ public class RealShrooms implements ModInitializer {
             }
 
             Block block = new ShroomBlock(settings, s.width(), s.height(), s.needsTree(), id(s.id()),
-                s.onWood(), s.humid());
+                s.onWood(), s.humid(), s.onStone(), s.needsDark());
             Registry.register(Registries.BLOCK, id(s.id()), block);
             BLOCKS.put(s.id(), block);
 
@@ -209,16 +223,32 @@ public class RealShrooms implements ModInitializer {
 
             // Природна генерація: див. data/realshrooms/worldgen/.
             RegistryKey<PlacedFeature> placed = RegistryKey.of(RegistryKeys.PLACED_FEATURE, id(s.id()));
-            BiomeModifications.addFeature(
-                BiomeSelectors.includeByKey(s.biomes()),
-                GenerationStep.Feature.VEGETAL_DECORATION,
-                placed);
+            if (s.biomes().isEmpty()) {
+                // Печерний вид: у всьому Верхньому світі, під землею.
+                BiomeModifications.addFeature(
+                    BiomeSelectors.foundInOverworld(),
+                    GenerationStep.Feature.UNDERGROUND_DECORATION,
+                    placed);
+            } else {
+                BiomeModifications.addFeature(
+                    BiomeSelectors.includeByKey(s.biomes()),
+                    GenerationStep.Feature.VEGETAL_DECORATION,
+                    placed);
+            }
         }
 
         // Смажений зморшок.
         Item cookedMorel = new Item(new FabricItemSettings().food(food(6, 0.6f).build()));
         Registry.register(Registries.ITEM, id("cooked_morel"), cookedMorel);
         ITEMS.put("cooked_morel", cookedMorel);
+
+        // Дріжжі: підгодовують грибницю (ПКМ по ній) і використовуються для хліба на заквасці.
+        Item yeast = new YeastItem(new FabricItemSettings());
+        Registry.register(Registries.ITEM, id("yeast"), yeast);
+        ITEMS.put("yeast", yeast);
+        Item sourdough = new Item(new FabricItemSettings().food(food(7, 0.8f).build()));
+        Registry.register(Registries.ITEM, id("sourdough_bread"), sourdough);
+        ITEMS.put("sourdough_bread", sourdough);
 
         // Шашлик із грибів.
         Item skewer = new Item(new FabricItemSettings().food(food(7, 0.7f).build()));
@@ -247,10 +277,13 @@ public class RealShrooms implements ModInitializer {
         // Травоїдні тварини їдять гриби й грибницю.
         GrazingHandler.register();
 
+        // Режим відладки: команда /realshrooms.
+        DebugCommands.register();
+
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.NATURAL).register(entries -> {
             for (Map.Entry<String, Item> e : ITEMS.entrySet()) {
                 String key = e.getKey();
-                if (!key.equals("cooked_morel") && !key.equals("mushroom_skewer")) {
+                if (!key.equals("cooked_morel") && !key.equals("mushroom_skewer") && !key.equals("sourdough_bread")) {
                     entries.add(e.getValue());
                 }
             }

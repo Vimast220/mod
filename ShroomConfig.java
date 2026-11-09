@@ -30,6 +30,8 @@ public final class ShroomConfig {
     public static boolean warEnabled = true;
     /** Опеньок вбиває дерева. Якщо вимкнено, живе як звичайна грибниця на корінні. */
     public static boolean parasiteEnabled = true;
+    /** Пліснява псує сіно (перетворює тюки на колонію). */
+    public static boolean moldEatsHay = true;
     /** Травоїдні їдять гриби й грибницю. */
     public static boolean animalsGraze = true;
     /** Множник швидкості захоплення (більше значить швидше). */
@@ -54,6 +56,7 @@ public final class ShroomConfig {
                 warEnabled = bool(json, "warEnabled", warEnabled);
                 parasiteEnabled = bool(json, "parasiteEnabled", parasiteEnabled);
                 animalsGraze = bool(json, "animalsGraze", animalsGraze);
+                moldEatsHay = bool(json, "moldEatsHay", moldEatsHay);
                 spreadSpeed = number(json, "spreadSpeed", spreadSpeed);
                 upkeepScale = number(json, "upkeepScale", upkeepScale);
                 hyphaLifespan = number(json, "hyphaLifespan", hyphaLifespan);
@@ -74,6 +77,7 @@ public final class ShroomConfig {
         json.addProperty("warEnabled", warEnabled);
         json.addProperty("parasiteEnabled", parasiteEnabled);
         json.addProperty("animalsGraze", animalsGraze);
+        json.addProperty("moldEatsHay", moldEatsHay);
         json.addProperty("spreadSpeed", spreadSpeed);
         json.addProperty("upkeepScale", upkeepScale);
         json.addProperty("hyphaLifespan", hyphaLifespan);

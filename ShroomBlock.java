@@ -5,6 +5,7 @@ import net.fabricmc.api.Environment;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.Fertilizable;
 import net.minecraft.block.PlantBlock;
 import net.minecraft.block.ShapeContext;
@@ -51,14 +52,18 @@ public class ShroomBlock extends PlantBlock implements Fertilizable {
     private final Identifier itemId;
     private final boolean onWood;
     private final boolean humid;
+    private final boolean onStone;
+    private final boolean needsDark;
 
     public ShroomBlock(AbstractBlock.Settings settings, int width, int height, boolean needsTree, Identifier itemId,
-                       boolean onWood, boolean humid) {
+                       boolean onWood, boolean humid, boolean onStone, boolean needsDark) {
         super(settings);
         this.needsTree = needsTree;
         this.itemId = itemId;
         this.onWood = onWood;
         this.humid = humid;
+        this.onStone = onStone;
+        this.needsDark = needsDark;
         for (int i = 0; i < 3; i++) {
             double w = Math.max(2.0, width * STAGE_SCALE[i]);
             double h = Math.max(2.0, height * STAGE_SCALE[i]);
@@ -92,7 +97,8 @@ public class ShroomBlock extends PlantBlock implements Fertilizable {
         return floor.isIn(BlockTags.DIRT)
             || floor.getBlock() instanceof SubstrateBlock
             || floor.getBlock() instanceof MyceliumBlock
-            || (this.onWood && floor.isIn(BlockTags.LOGS));
+            || (this.onWood && (floor.isIn(BlockTags.LOGS) || floor.isOf(Blocks.HAY_BLOCK)))
+            || (this.onStone && (floor.isIn(BlockTags.BASE_STONE_OVERWORLD) || floor.isOf(Blocks.MOSS_BLOCK)));
     }
 
     // ---------- ріст і поширення ----------
@@ -114,10 +120,13 @@ public class ShroomBlock extends PlantBlock implements Fertilizable {
 
         // Вологолюбні види (напр. мицена) ростуть лише в сирості: дощ, вода поруч або вологий ґрунт.
         boolean wetEnough = !this.humid || moist || world.hasRain(pos) || SubstrateBlock.hasWaterNearby(world, pos);
+        // Печерні гриби бояться світла: на світлі не ростуть, а плодові тіла в'януть.
+        boolean darkEnough = !this.needsDark || world.getLightLevel(pos) <= 7;
+        boolean fine = wetEnough && darkEnough;
 
         int age = state.get(AGE);
         if (age < 2) {
-            if (!wetEnough) {
+            if (!fine) {
                 return;
             }
             int denominator;
@@ -138,7 +147,7 @@ public class ShroomBlock extends PlantBlock implements Fertilizable {
         }
 
         // Ніжні вологолюбні гриби живуть недовго: у посуху плодове тіло в'яне.
-        if (!wetEnough && random.nextInt(30) == 0) {
+        if (!fine && random.nextInt(30) == 0) {
             world.breakBlock(pos, false);
             return;
         }
